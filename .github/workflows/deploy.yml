@@ -1,0 +1,71 @@
+# =========================================================
+# Deploy ZeroBook Infinity static site to GitHub Pages
+# Triggers: every push to main, or manually from the Actions tab
+# =========================================================
+name: Deploy ZeroBook Infinity to GitHub Pages
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:          # "Run workflow" button in the Actions tab
+
+# GITHUB_TOKEN permissions needed by the Pages deployment
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Only one deployment at a time; don't cancel a running production deploy
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  # ---------- Job 1: validate + package the site ----------
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate that all required files exist
+        run: |
+          set -e
+          for f in index.html assets/css/styles.css assets/js/main.js; do
+            test -f "$f" || { echo "::error::Missing $f"; exit 1; }
+          done
+          echo "Image count: $(find assets/img -type f | wc -l)"
+
+      - name: Check every image referenced in index.html exists
+        run: |
+          missing=0
+          for img in $(grep -oE 'assets/img/[A-Za-z0-9_./-]+' index.html | sort -u); do
+            if [ ! -f "$img" ]; then echo "::error::Missing image $img"; missing=1; fi
+          done
+          exit $missing
+
+      - name: Prepare publish folder
+        run: |
+          mkdir -p _site
+          cp -r index.html assets _site/
+          touch _site/.nojekyll        # serve files as-is, skip Jekyll
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload site artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./_site
+
+  # ---------- Job 2: deploy to GitHub Pages ----------
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
